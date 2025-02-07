@@ -24,9 +24,7 @@ STORE_NAME = os.getenv("STORE_NAME") # Название магазина
 SELLER_BIN = os.getenv("SELLER_BIN") # БИН/ИИН Продавца
 ADMIN_ID = os.getenv("ADMIN_ID") # USER_ID Админа в телеграм (бот отправляет подозрительную активность)
 KASPI_QR = os.getenv("KASPI_QR") # ссылка для оплаты
-os.environ["TESSDATA_PREFIX"] = "/opt/homebrew/share/tessdata"
-# Set the TESSDATA_PREFIX environment variable for Deploy
-# os.environ["TESSDATA_PREFIX"] = os.getenv("TESSDATA_PREFIX", "/app/.apt/usr/share/tesseract-ocr/4.00/tessdata")
+os.environ["TESSDATA_PREFIX"] = os.getenv("TESSDATA_PREFIX", "/app/.apt/usr/share/tesseract-ocr/4.00/tessdata")
 os.makedirs("downloads", exist_ok=True)
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
