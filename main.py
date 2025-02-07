@@ -13,12 +13,26 @@ from aiogram.types import Message, CallbackQuery
 from pdf2image import convert_from_path
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
 import hashlib
 
 from database import init_db
 from keyboards import purchase_keyboard, purchase_inline_keyboard, support_builder_keyboard
 
 TOKEN = os.getenv("TOKEN")
+
+HEROKU_APP_NAME = os.getenv('telepay-production-app')
+
+# webhook settings
+WEBHOOK_HOST = f'https://{HEROKU_APP_NAME}.herokuapp.com'
+WEBHOOK_PATH = f'/webhook/{TOKEN}'
+WEBHOOK_URL = f'{WEBHOOK_HOST}{WEBHOOK_PATH}'
+
+# webserver settings
+WEBAPP_HOST = '0.0.0.0'
+WEBAPP_PORT = int(os.getenv('PORT', default=8000))
+
 PAYMENT_AMOUNT = os.getenv("PAYMENT_AMOUNT") # Цена товара
 STORE_NAME = os.getenv("STORE_NAME") # Название магазина
 SELLER_BIN = os.getenv("SELLER_BIN") # БИН/ИИН Продавца
@@ -29,13 +43,11 @@ os.makedirs("downloads", exist_ok=True)
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-
 class SupportStates(StatesGroup):
     support_message = State()
 
 # --- Логирование ---
 logging.basicConfig(level=logging.INFO)
-
 
 @dp.message(Command("start"))
 async def send_welcome(message: Message):
@@ -52,7 +64,6 @@ async def start_purchase(message: Message):
         parse_mode="Markdown"
     )
 
-
 @dp.message(lambda message: message.document and message.document.mime_type == "application/pdf")
 async def check_receipt(message: Message):
     """Проверка PDF-чека"""
@@ -66,7 +77,7 @@ async def check_receipt(message: Message):
     pdf_path = f"downloads/receipt_{user_id}.pdf"
 
     try:
-        # --- Скачивание PDF-файла в па��ять ---
+        # --- Скачивание PDF-файла в память ---
         file_bytes = io.BytesIO()
         await bot.download_file(file.file_path, file_bytes)
         file_bytes.seek(0)  # Вернуть курсор в начало файла
@@ -146,7 +157,7 @@ async def check_pdf_metadata(pdf_path: str):
         reader = PyPDF2.PdfReader(pdf_path)
         metadata = reader.metadata
 
-        # Проверяем, совпадает ли Producer (Kaspi или WeasyPrint)
+        # П��оверяем, совпадает ли Producer (Kaspi или WeasyPrint)
         if metadata and metadata.get('/Producer', '') == "WeasyPrint 62.3" and metadata.get('/Title', '') == "Чек":
             logging.info("✅ Producer check passed.")
             return True
@@ -164,14 +175,14 @@ async def handle_support_callback(message: Message):
 
 @dp.message(F.text.in_({"❓ Чек не распознается", "❓ Я не получил ссылки", "❓ Другое"}))
 async def handle_support_builder_callback(message: Message, state: FSMContext):
-    """Обр��ботка выбора в поддержке"""
+    """Обработка выбора в поддержке"""
     if message.text == "🚫 Отмена":
         await state.clear()
         await message.answer("✅ Операция отменена", reply_markup=purchase_keyboard)
         return
     button_text = message.text
     await state.update_data(support_title=button_text)
-    await message.answer("Пожалуйста, напишите дополнительный текст для сообщения в поддержку.")
+    await message.answer("Пожалуйста, напишите дополн��тельный текст для сообщения в поддержку.")
     await state.set_state(SupportStates.support_message)
 
 @dp.message(SupportStates.support_message)
@@ -194,10 +205,21 @@ async def handle_additional_text(message: Message, state: FSMContext):
     await message.answer("Ваше сообщение в поддержку отправлено.", reply_markup=purchase_keyboard)
     await state.clear()
 
-async def main():
+async def on_startup(dispatcher):
+    await bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True)
     await init_db()
-    logging.info("🤖 Бот запущен...")
-    await dp.start_polling(bot)
 
-if __name__ == "__main__":
-    asyncio.run(main())
+async def on_shutdown(dispatcher):
+    await bot.delete_webhook()
+
+async def main():
+    app = web.Application()
+    SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
+    setup_application(app, dp, bot=bot)
+    app.on_startup.append(on_startup)
+    app.on_shutdown.append(on_shutdown)
+    return app
+
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
+    web.run_app(main(), host=WEBAPP_HOST, port=WEBAPP_PORT)
